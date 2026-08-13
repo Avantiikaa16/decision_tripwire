@@ -4,6 +4,10 @@
 
 Built for the MongoDB "No Cold Start" hackathon (Persistent Context Sprint, .local Build Fest SF, 2026-08-13).
 
+## Submission description
+
+Decision Tripwire is an assumption-aware intervention layer for autonomous agents. It stores decisions together with the assumptions that justify them in MongoDB Atlas. When new operational evidence arrives, candidate assumptions are retrieved, a Fireworks-hosted LLM (with OpenRouter as a live-verified fallback) classifies whether the evidence contradicts them, and a deterministic policy engine — not the model — makes the final call to pause the action. Every event, revision, and intervention persists in MongoDB across sessions, so the agent never returns to a cold start.
+
 ## Problem
 
 AI agents make decisions from assumptions, but they rarely notice when those assumptions stop being true. A deployment agent approves a rollout because "traffic is currently low." Traffic spikes an hour later. Nothing about that agent's world model changes — it has no memory of what the decision depended on, so it can't know the decision is now unsafe.
