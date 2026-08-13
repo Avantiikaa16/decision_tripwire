@@ -107,15 +107,7 @@ export async function classifyRelationship(
   let raw: string | null = null;
   let classifiedBy = "";
 
-  if (env.openrouterApiKey()) {
-    raw = await callChatCompletion(
-      "https://openrouter.ai/api/v1/chat/completions",
-      env.openrouterApiKey(),
-      env.openrouterModel(),
-      userPrompt
-    );
-    classifiedBy = "openrouter";
-  } else if (env.fireworksApiKey()) {
+  if (env.fireworksApiKey()) {
     raw = await callChatCompletion(
       "https://api.fireworks.ai/inference/v1/chat/completions",
       env.fireworksApiKey(),
@@ -123,6 +115,14 @@ export async function classifyRelationship(
       userPrompt
     );
     classifiedBy = "fireworks";
+  } else if (env.openrouterApiKey()) {
+    raw = await callChatCompletion(
+      "https://openrouter.ai/api/v1/chat/completions",
+      env.openrouterApiKey(),
+      env.openrouterModel(),
+      userPrompt
+    );
+    classifiedBy = "openrouter";
   }
 
   if (!raw) {
