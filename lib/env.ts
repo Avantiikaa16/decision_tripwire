@@ -14,7 +14,7 @@ export const env = {
     process.env.OPENROUTER_MODEL || "meta-llama/llama-3.1-8b-instruct:free",
   fireworksApiKey: () => process.env.FIREWORKS_API_KEY || "",
   fireworksModel: () =>
-    process.env.FIREWORKS_MODEL || "accounts/fireworks/models/llama-v3p1-8b-instruct",
+    process.env.FIREWORKS_MODEL || "accounts/fireworks/models/gpt-oss-20b",
   embeddingApiKey: () => process.env.EMBEDDING_API_KEY || "",
   embeddingModel: () => process.env.EMBEDDING_MODEL || "",
   tenantId: "demo-company" as const,
