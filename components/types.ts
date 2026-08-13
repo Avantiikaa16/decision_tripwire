@@ -54,6 +54,7 @@ export interface ClientEventResult {
     interventionTriggered: boolean;
   };
   decision: ClientDecision | null;
+  assumptions: ClientAssumption[];
   intervention: ClientIntervention | null;
   usedVectorSearch: boolean;
   wasDuplicate: boolean;

@@ -100,6 +100,7 @@ export default function Home() {
 
     setEventResult(result);
     if (result.decision) setDecision(result.decision);
+    if (result.assumptions) setAssumptions(result.assumptions);
     setTriggering(false);
   }
 

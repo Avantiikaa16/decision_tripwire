@@ -9,9 +9,9 @@ import {
   findCurrentDecision,
   applyIntervention,
 } from "./repositories/decisions";
-import { setAssumptionStatus } from "./repositories/assumptions";
+import { setAssumptionStatus, findAssumptionsByIds } from "./repositories/assumptions";
 import { findEventByIdempotencyKey, insertEvent } from "./repositories/events";
-import type { DecisionDoc, EventDoc, Intervention } from "./types";
+import type { AssumptionDoc, DecisionDoc, EventDoc, Intervention } from "./types";
 
 export interface TripwireInput {
   content: string;
@@ -22,6 +22,7 @@ export interface TripwireInput {
 export interface TripwireResult {
   event: EventDoc;
   decision: DecisionDoc | null;
+  assumptions: AssumptionDoc[];
   intervention: Intervention | null;
   usedVectorSearch: boolean;
   wasDuplicate: boolean;
@@ -44,9 +45,13 @@ export async function processEvent(
     const intervention =
       decision?.interventions.find((i) => i.eventId.equals(existing._id)) ??
       null;
+    const assumptions = decision
+      ? await findAssumptionsByIds(decision.assumptionIds)
+      : [];
     return {
       event: existing,
       decision,
+      assumptions,
       intervention,
       usedVectorSearch: false,
       wasDuplicate: true,
@@ -87,9 +92,11 @@ export async function processEvent(
 
   if (candidates.length === 0) {
     const event = await insertEvent(baseEvent);
+    const assumptions = await findAssumptionsByIds(decision.assumptionIds);
     return {
       event,
       decision,
+      assumptions,
       intervention: null,
       usedVectorSearch: retrieval.usedVectorSearch,
       wasDuplicate: false,
@@ -128,9 +135,12 @@ export async function processEvent(
     interventionTriggered: policy.action === "pause",
   });
 
+  const assumptions = await findAssumptionsByIds(decision.assumptionIds);
+
   return {
     event,
     decision: updatedDecision,
+    assumptions,
     intervention,
     usedVectorSearch: retrieval.usedVectorSearch,
     wasDuplicate: false,
