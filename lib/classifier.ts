@@ -21,28 +21,41 @@ const SYSTEM_PROMPT =
   "Do not decide whether to execute or pause the deployment.";
 
 /**
- * The deterministic numeric rule doubles as the fallback classification, so
- * "the model is down" and "the model was never configured" behave
- * identically -- the demo outcome never depends on the LLM being reachable.
+ * The deterministic numeric rule doubles as the fallback classification for
+ * traffic_update events, so "the model is down" and "the model was never
+ * configured" behave identically for that path. Natural-language
+ * "operational_evidence" events have no comparable numeric field by
+ * design -- that's the whole point of that event type, it genuinely
+ * requires reasoning -- so if the model is unreachable for one of those,
+ * the honest answer is "uncertain" (flag for human review), not a guessed
+ * verdict with no basis.
  */
 function deterministicClassification(
   event: Pick<EventDoc, "structuredData">,
   assumption: Pick<AssumptionDoc, "structuredCondition">
 ): Classification {
+  if (!event.structuredData || event.structuredData.metric !== assumption.structuredCondition.metric) {
+    return {
+      relationship: "uncertain",
+      confidence: 0,
+      reason: "No model was reachable to reason about this natural-language evidence, and there is no comparable numeric field to fall back on.",
+      classifiedBy: "deterministic-fallback",
+    };
+  }
   const { value } = event.structuredData;
   const { threshold } = assumption.structuredCondition;
   if (value > threshold) {
     return {
       relationship: "contradicts",
       confidence: 1,
-      reason: `Deterministic rule: observed ${value} req/min exceeds the safe threshold of ${threshold} req/min.`,
+      reason: `Deterministic rule: observed ${value} exceeds the safe threshold of ${threshold}.`,
       classifiedBy: "deterministic-fallback",
     };
   }
   return {
     relationship: "supports",
     confidence: 1,
-    reason: `Deterministic rule: observed ${value} req/min is within the safe threshold of ${threshold} req/min.`,
+    reason: `Deterministic rule: observed ${value} is within the safe threshold of ${threshold}.`,
     classifiedBy: "deterministic-fallback",
   };
 }
@@ -101,7 +114,11 @@ export async function classifyRelationship(
   const userPrompt = JSON.stringify({
     event: { type: event.type, content: event.content, structuredData: event.structuredData },
     assumption: { content: assumption.content, structuredCondition: assumption.structuredCondition },
-    decision: { title: decision.title, version: decision.version },
+    decision: {
+      title: decision.title,
+      productionVersion: decision.productionVersion,
+      candidateVersion: decision.candidateVersion,
+    },
   });
 
   let raw: string | null = null;

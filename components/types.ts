@@ -3,29 +3,41 @@
 
 export type DecisionStatus =
   | "ready"
-  | "deploying"
-  | "paused"
-  | "completed"
-  | "cancelled";
+  | "canary_deploying"
+  | "assumption_invalidated"
+  | "rolling_back"
+  | "rolled_back"
+  | "blocked_pending_review"
+  | "critical_incident";
 
 export type AssumptionStatus = "valid" | "challenged" | "invalidated" | "superseded";
 
+export type InterventionType =
+  | "candidate_blocked"
+  | "canary_rollback"
+  | "critical_incident_escalation";
+
 export interface ClientIntervention {
-  type: "assumption_invalidated";
+  type: InterventionType;
   eventId: string;
   assumptionId: string;
   previousStatus: DecisionStatus;
   newStatus: DecisionStatus;
   reason: string;
+  fromVersion?: string;
+  toVersion?: string;
   createdAt: string;
 }
 
 export interface ClientDecision {
   _id: string;
   title: string;
-  version: string;
+  productionVersion: string;
+  candidateVersion: string;
   status: DecisionStatus;
-  progress: number;
+  canaryPercentage: number;
+  previousCanaryPercentage: number;
+  rollbackCompleted: boolean;
   assumptionIds: string[];
   revision: number;
   interventions: ClientIntervention[];
@@ -50,6 +62,7 @@ export interface ClientEventResult {
   event: {
     _id: string;
     content: string;
+    structuredData: { metric: string; value: number } | null;
     classification: ClientClassification | null;
     interventionTriggered: boolean;
   };

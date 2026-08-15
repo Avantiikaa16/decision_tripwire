@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { findCurrentDecision, setDecisionStatus } from "@/lib/repositories/decisions";
+import { findCurrentDecision, startCanary } from "@/lib/repositories/decisions";
+
+const CANARY_PERCENTAGE = 5;
 
 export async function POST() {
   const tenantId = env.tenantId;
@@ -11,6 +13,6 @@ export async function POST() {
   if (decision.status !== "ready") {
     return NextResponse.json({ decision });
   }
-  const updated = await setDecisionStatus(decision._id, "deploying");
+  const updated = await startCanary(decision._id, CANARY_PERCENTAGE);
   return NextResponse.json({ decision: updated });
 }

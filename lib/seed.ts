@@ -12,7 +12,7 @@ export interface SeedResult {
 }
 
 const TRAFFIC_ASSUMPTION_CONTENT =
-  "Traffic must remain below 1,000 requests per minute.";
+  "Traffic will remain low during the rollout, below approximately 1,000 requests per minute.";
 
 /**
  * Deletes only this demo's tenant records (never a blanket collection wipe)
@@ -32,10 +32,13 @@ export async function resetAndSeedDemo(): Promise<SeedResult> {
   const decision = await insertDecision({
     tenantId,
     type: "software_deployment",
-    title: "Deploy version 2",
-    version: "2.0.0",
+    title: "Canary rollout to v2.0.0",
+    productionVersion: "1.0.0",
+    candidateVersion: "2.0.0",
     status: "ready",
-    progress: 0,
+    canaryPercentage: 0,
+    previousCanaryPercentage: 0,
+    rollbackCompleted: false,
     assumptionIds: [],
     revision: 1,
     interventions: [],

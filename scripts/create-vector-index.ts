@@ -14,27 +14,46 @@ async function main() {
   const db = await getDb();
   const collection = db.collection("assumptions");
 
+  const definition = {
+    fields: [
+      {
+        type: "vector" as const,
+        path: "embedding",
+        numDimensions: EMBEDDING_DIMENSIONS,
+        similarity: "cosine" as const,
+      },
+      { type: "filter" as const, path: "tenantId" },
+      { type: "filter" as const, path: "status" },
+    ],
+  };
+
   const existing = await collection.listSearchIndexes().toArray();
-  if (existing.some((i) => i.name === ASSUMPTIONS_VECTOR_INDEX)) {
-    console.log(`Index "${ASSUMPTIONS_VECTOR_INDEX}" already exists. Skipping.`);
+  const current = existing.find((i) => i.name === ASSUMPTIONS_VECTOR_INDEX);
+
+  if (current) {
+    const currentDims = (
+      current as unknown as {
+        latestDefinition?: { fields?: { numDimensions?: number }[] };
+      }
+    ).latestDefinition?.fields?.[0]?.numDimensions;
+    if (currentDims === EMBEDDING_DIMENSIONS) {
+      console.log(
+        `Index "${ASSUMPTIONS_VECTOR_INDEX}" already exists at ${EMBEDDING_DIMENSIONS} dimensions. Skipping.`
+      );
+      return;
+    }
+    console.log(
+      `Index "${ASSUMPTIONS_VECTOR_INDEX}" exists at ${currentDims} dimensions, updating to ${EMBEDDING_DIMENSIONS}...`
+    );
+    await collection.updateSearchIndex(ASSUMPTIONS_VECTOR_INDEX, definition);
+    console.log("Update requested. It can take a minute to rebuild.");
     return;
   }
 
   await collection.createSearchIndex({
     name: ASSUMPTIONS_VECTOR_INDEX,
     type: "vectorSearch",
-    definition: {
-      fields: [
-        {
-          type: "vector",
-          path: "embedding",
-          numDimensions: EMBEDDING_DIMENSIONS,
-          similarity: "cosine",
-        },
-        { type: "filter", path: "tenantId" },
-        { type: "filter", path: "status" },
-      ],
-    },
+    definition,
   });
 
   console.log(

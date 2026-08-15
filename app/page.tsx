@@ -1,18 +1,26 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { DeploymentCard } from "@/components/DeploymentCard";
 import { AssumptionCard } from "@/components/AssumptionCard";
-import { EventTrigger } from "@/components/EventTrigger";
+import { EvidenceTrigger, TrafficSpikeTrigger } from "@/components/EventTrigger";
 import { InterventionSequence } from "@/components/InterventionSequence";
 import { PersistenceProof } from "@/components/PersistenceProof";
 import type { ClientAssumption, ClientDecision, ClientEventResult } from "@/components/types";
 
+const MARKETING_EVIDENCE_PAYLOAD = {
+  content: "Marketing moved the product launch to now. Approximately 50,000 users are expected.",
+  type: "operational_evidence" as const,
+  structuredData: { metric: "expected_users", value: 50000 },
+};
+
 const TRAFFIC_SPIKE_PAYLOAD = {
   content: "Traffic has increased to 3,500 requests per minute.",
   type: "traffic_update" as const,
-  requestsPerMinute: 3500,
+  structuredData: { metric: "requests_per_minute", value: 3500 },
 };
+
+const BLOCKED_STATUSES = new Set(["blocked_pending_review", "critical_incident"]);
 
 export default function Home() {
   const [decision, setDecision] = useState<ClientDecision | null>(null);
@@ -22,10 +30,9 @@ export default function Home() {
   const [triggering, setTriggering] = useState(false);
   const [stage, setStage] = useState(0);
   const [eventResult, setEventResult] = useState<ClientEventResult | null>(null);
+  const [currentTrafficRpm, setCurrentTrafficRpm] = useState<number | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [reconnectMessage, setReconnectMessage] = useState<string | null>(null);
-
-  const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function loadDecision() {
     const res = await fetch("/api/decision");
@@ -50,26 +57,6 @@ export default function Home() {
     loadDecision();
   }, []);
 
-  // Drives simulated deployment progress while status === "deploying".
-  // Stops itself the instant status changes -- including when a tripwire
-  // intervention pauses the deployment out from under it.
-  useEffect(() => {
-    if (progressTimer.current) {
-      clearInterval(progressTimer.current);
-      progressTimer.current = null;
-    }
-    if (decision?.status === "deploying") {
-      progressTimer.current = setInterval(async () => {
-        const res = await fetch("/api/deployment/progress", { method: "POST" });
-        const data = await res.json();
-        if (data.decision) setDecision(data.decision);
-      }, 700);
-    }
-    return () => {
-      if (progressTimer.current) clearInterval(progressTimer.current);
-    };
-  }, [decision?.status]);
-
   async function handleStart() {
     setStarting(true);
     const res = await fetch("/api/deployment/start", { method: "POST" });
@@ -78,16 +65,19 @@ export default function Home() {
     setStarting(false);
   }
 
-  async function handleTrigger() {
-    if (triggering || decision?.status !== "deploying") return;
+  async function handleTrigger(payload: typeof MARKETING_EVIDENCE_PAYLOAD | typeof TRAFFIC_SPIKE_PAYLOAD) {
+    if (triggering || decision?.status !== "canary_deploying") return;
     setTriggering(true);
     setEventResult(null);
     setStage(1);
+    if (payload.structuredData.metric === "requests_per_minute") {
+      setCurrentTrafficRpm(payload.structuredData.value);
+    }
 
     const resultPromise = fetch("/api/events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(TRAFFIC_SPIKE_PAYLOAD),
+      body: JSON.stringify(payload),
     }).then((r) => r.json());
 
     const advance = (n: number, delay: number) =>
@@ -106,10 +96,6 @@ export default function Home() {
 
   async function handleReconnect() {
     setReconnecting(true);
-    if (progressTimer.current) {
-      clearInterval(progressTimer.current);
-      progressTimer.current = null;
-    }
     const res = await fetch("/api/demo/reconnect", { method: "POST" });
     const data = await res.json();
     if (data.decision) setDecision(data.decision);
@@ -124,6 +110,7 @@ export default function Home() {
     setLoading(true);
     setStage(0);
     setEventResult(null);
+    setCurrentTrafficRpm(null);
     setReconnectMessage(null);
     await fetch("/api/demo/reset", { method: "POST" });
     await loadDecision();
@@ -137,8 +124,9 @@ export default function Home() {
     );
   }
 
+  const isBlocked = BLOCKED_STATUSES.has(decision.status);
   const monitorState: "monitoring" | "checking" | "tripwire" =
-    decision.status === "paused" ? "tripwire" : triggering ? "checking" : "monitoring";
+    isBlocked ? "tripwire" : triggering ? "checking" : "monitoring";
   const monitorLabel = {
     monitoring: "MONITORING",
     checking: "CHECKING",
@@ -164,7 +152,7 @@ export default function Home() {
             </span>
           </div>
           <p className="mt-1 text-sm text-slate-400">
-            Assumption-aware safety for AI agents
+            Assumption-aware safety for autonomous rollouts
           </p>
         </div>
         <button
@@ -177,7 +165,11 @@ export default function Home() {
 
       <div className="space-y-6">
         <div className="divide-y divide-slate-800 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg">
-          <DeploymentCard decision={decision} checking={triggering} />
+          <DeploymentCard
+            decision={decision}
+            checking={triggering}
+            currentTrafficRpm={currentTrafficRpm}
+          />
 
           {assumptions.map((a) => (
             <div key={a._id} className="pt-4">
@@ -185,17 +177,22 @@ export default function Home() {
             </div>
           ))}
 
-          <div className="grid grid-cols-2 gap-3 pt-4">
+          <div className="space-y-3 pt-4">
             <button
               onClick={handleStart}
               disabled={decision.status !== "ready" || starting}
-              className="rounded-lg bg-emerald-600 px-4 py-2.5 font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+              className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
             >
-              {starting ? "Starting..." : "Start Deployment"}
+              {starting ? "Starting..." : "Start Canary Rollout (5%)"}
             </button>
-            <EventTrigger
-              onTrigger={handleTrigger}
-              disabled={decision.status !== "deploying" || triggering}
+            <EvidenceTrigger
+              onTrigger={() => handleTrigger(MARKETING_EVIDENCE_PAYLOAD)}
+              disabled={decision.status !== "canary_deploying" || triggering}
+              triggering={triggering}
+            />
+            <TrafficSpikeTrigger
+              onTrigger={() => handleTrigger(TRAFFIC_SPIKE_PAYLOAD)}
+              disabled={decision.status !== "canary_deploying" || triggering}
               triggering={triggering}
             />
           </div>
@@ -203,7 +200,7 @@ export default function Home() {
 
         <InterventionSequence stage={stage} result={eventResult} />
 
-        {decision.status === "paused" && (
+        {isBlocked && (
           <PersistenceProof
             onSimulate={handleReconnect}
             loading={reconnecting}

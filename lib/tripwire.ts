@@ -5,18 +5,22 @@ import { generateEmbedding } from "./embeddings";
 import { retrieveCandidateAssumptions } from "./vector-search";
 import { classifyRelationship } from "./classifier";
 import { decidePolicy } from "./policy-engine";
-import {
-  findCurrentDecision,
-  applyIntervention,
-} from "./repositories/decisions";
+import { findCurrentDecision, applyIntervention } from "./repositories/decisions";
 import { setAssumptionStatus, findAssumptionsByIds } from "./repositories/assumptions";
 import { findEventByIdempotencyKey, insertEvent } from "./repositories/events";
-import type { AssumptionDoc, DecisionDoc, EventDoc, Intervention } from "./types";
+import type {
+  AssumptionDoc,
+  DecisionDoc,
+  EventDoc,
+  EventStructuredData,
+  EventType,
+  Intervention,
+} from "./types";
 
 export interface TripwireInput {
   content: string;
-  type: "traffic_update";
-  requestsPerMinute: number;
+  type: EventType;
+  structuredData: EventStructuredData | null;
 }
 
 export interface TripwireResult {
@@ -29,7 +33,7 @@ export interface TripwireResult {
 }
 
 function computeIdempotencyKey(tenantId: string, input: TripwireInput): string {
-  const raw = `${tenantId}:${input.type}:${input.content}:${input.requestsPerMinute}`;
+  const raw = `${tenantId}:${input.type}:${input.content}:${input.structuredData?.value ?? ""}`;
   return createHash("sha256").update(raw).digest("hex");
 }
 
@@ -81,7 +85,7 @@ export async function processEvent(
     tenantId,
     type: input.type,
     content: input.content,
-    structuredData: { metric: "requests_per_minute", value: input.requestsPerMinute },
+    structuredData: input.structuredData,
     embedding: embedding ?? [],
     candidateAssumptionIds: candidates.map((a) => a._id),
     classification: null,
@@ -109,30 +113,63 @@ export async function processEvent(
     primaryAssumption,
     decision
   );
-  const policy = decidePolicy(baseEvent, primaryAssumption, classification);
+  const policy = decidePolicy(decision, baseEvent, primaryAssumption, classification);
 
   let intervention: Intervention | null = null;
   let updatedDecision: DecisionDoc | null = decision;
 
   await setAssumptionStatus(primaryAssumption._id, policy.assumptionNewStatus);
 
-  if (policy.action === "pause") {
+  if (policy.action === "block") {
     intervention = {
-      type: "assumption_invalidated",
+      type: "candidate_blocked",
       eventId,
       assumptionId: primaryAssumption._id,
       previousStatus: decision.status,
-      newStatus: "paused",
+      newStatus: "blocked_pending_review",
       reason: policy.reason,
       createdAt: new Date(),
     };
-    updatedDecision = await applyIntervention(decision._id, intervention, "paused");
+    updatedDecision = await applyIntervention(decision._id, intervention, {
+      newStatus: "blocked_pending_review",
+    });
+  } else if (policy.action === "rollback") {
+    intervention = {
+      type: "canary_rollback",
+      eventId,
+      assumptionId: primaryAssumption._id,
+      previousStatus: decision.status,
+      newStatus: "blocked_pending_review",
+      reason: policy.reason,
+      fromVersion: decision.candidateVersion,
+      toVersion: decision.productionVersion,
+      createdAt: new Date(),
+    };
+    updatedDecision = await applyIntervention(decision._id, intervention, {
+      newStatus: "blocked_pending_review",
+      canaryPercentage: 0,
+      previousCanaryPercentage: decision.canaryPercentage,
+      rollbackCompleted: true,
+    });
+  } else if (policy.action === "escalate") {
+    intervention = {
+      type: "critical_incident_escalation",
+      eventId,
+      assumptionId: primaryAssumption._id,
+      previousStatus: decision.status,
+      newStatus: "critical_incident",
+      reason: policy.reason,
+      createdAt: new Date(),
+    };
+    updatedDecision = await applyIntervention(decision._id, intervention, {
+      newStatus: "critical_incident",
+    });
   }
 
   const event = await insertEvent({
     ...baseEvent,
     classification,
-    interventionTriggered: policy.action === "pause",
+    interventionTriggered: intervention !== null,
   });
 
   const assumptions = await findAssumptionsByIds(decision.assumptionIds);

@@ -36,58 +36,76 @@ export async function setDecisionStatus(
   status: DecisionStatus
 ): Promise<DecisionDoc | null> {
   const col = await collection();
-  const result = await col.findOneAndUpdate(
+  return col.findOneAndUpdate(
     { _id: id },
     { $set: { status, updatedAt: new Date() } },
     { returnDocument: "after" }
   );
-  return result;
 }
 
 /**
- * Only advances progress while the decision is actively deploying, so a
- * paused/completed/cancelled deployment can never silently keep moving.
+ * Starts the canary rollout: ready -> canary_deploying at the given
+ * percentage. Only applies if the decision is currently "ready" -- a
+ * canary that's already running, blocked, or rolled back can't be
+ * (re)started this way.
  */
-export async function incrementProgress(
+export async function startCanary(
   id: ObjectId,
-  amount: number
+  percentage: number
 ): Promise<DecisionDoc | null> {
   const col = await collection();
-  const current = await col.findOne({ _id: id });
-  if (!current || current.status !== "deploying") {
-    return current;
-  }
-  const nextProgress = Math.min(100, current.progress + amount);
-  const status: DecisionStatus =
-    nextProgress >= 100 ? "completed" : "deploying";
-  const result = await col.findOneAndUpdate(
-    { _id: id, status: "deploying" },
-    { $set: { progress: nextProgress, status, updatedAt: new Date() } },
+  return col.findOneAndUpdate(
+    { _id: id, status: "ready" },
+    {
+      $set: {
+        status: "canary_deploying",
+        canaryPercentage: percentage,
+        updatedAt: new Date(),
+      },
+    },
     { returnDocument: "after" }
   );
-  return result;
 }
 
 /**
- * Applies an intervention atomically: records the reason, flips status, and
- * bumps revision in one update so the decision's history is self-contained.
+ * Applies an intervention atomically: records the reason, flips status,
+ * updates canary exposure if a rollback occurred, and bumps revision -- all
+ * in one update so the decision's history is self-contained and consistent.
  */
 export async function applyIntervention(
   id: ObjectId,
   intervention: Intervention,
-  newStatus: DecisionStatus
+  updates: {
+    newStatus: DecisionStatus;
+    canaryPercentage?: number;
+    previousCanaryPercentage?: number;
+    rollbackCompleted?: boolean;
+  }
 ): Promise<DecisionDoc | null> {
   const col = await collection();
-  const result = await col.findOneAndUpdate(
+  const setFields: Record<string, unknown> = {
+    status: updates.newStatus,
+    updatedAt: new Date(),
+  };
+  if (updates.canaryPercentage !== undefined) {
+    setFields.canaryPercentage = updates.canaryPercentage;
+  }
+  if (updates.previousCanaryPercentage !== undefined) {
+    setFields.previousCanaryPercentage = updates.previousCanaryPercentage;
+  }
+  if (updates.rollbackCompleted !== undefined) {
+    setFields.rollbackCompleted = updates.rollbackCompleted;
+  }
+
+  return col.findOneAndUpdate(
     { _id: id },
     {
-      $set: { status: newStatus, updatedAt: new Date() },
+      $set: setFields,
       $inc: { revision: 1 },
       $push: { interventions: intervention },
     },
     { returnDocument: "after" }
   );
-  return result;
 }
 
 export async function deleteDecisionsByTenant(
